@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# SSH Failed Login Detector
+# Author: Shady Emad
+# Date: 2/7/2024
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+   echo "Please run this script as root (using sudo)"
+   exit 1
+fi   
+
+log_file="/var/log/secure"
+today=$(date +%F)
+output_file="failed_ssh_report_${today}.txt"
+
+# Check if log file exists
+if [ ! -f "$log_file" ]; then
+    echo "Log file not found: $log_file"
+    exit 1
+fi
+
+# Write report header
+echo "SSH Failed Login Attempts" > "$output_file"
+echo "Generated on: $(date)" >> "$output_file"
+echo "----------------------------------------" >> "$output_file"
+
+# Extract failed login attempts from the log
+grep "Failed password" "$log_file" | while read -r line; do
+    date_part=$(echo "$line" | awk '{print $1, $2, $3}')
+    user=$(echo "$line" | grep -oP "for (invalid user )?\K\S+" | head -n1)
+    ip=$(echo "$line" | grep -oE "from ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)" | awk '{print $2}')
+    
+    # Append each attempt to the report file
+    echo "$date_part | User: $user | IP: $ip" >> "$output_file"
+done
+
+# Add Top IPs summary header
+echo -e "\nTop IPs by number of failed attempts:" >> "$output_file"
+echo "----------------------------------------" >> "$output_file"
+
+# Calculate and append Top IPs by failed attempts
+grep "Failed password" "$log_file" | \
+  grep -oE "from ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)" | \
+  awk '{print $2}' | \
+  sort | uniq -c | sort -nr >> "$output_file"
+
+echo "Report saved to $output_file"
+
+# Function to clean up old reports
+cleanup_old_reports() {
+    echo "Cleaning up reports older than $retention_days days..."
+    find . -name "failed_ssh_report_*.txt" -type f -mtime +$retention_days -exec rm -v {} \;
+}
+
+# Ask user if they want to delete old reports
+read -p "Do you want to delete reports older than a certain number of days? (y/n): " cleanup_choice
+
+if [[ "$cleanup_choice" == [Yy] ]]; then
+    read -p "Enter retention days for old reports (e.g., 7): " retention_days
+    cleanup_old_reports
+else
+    echo "Skipped deleting old reports."
+fi
+
+
+
+
+
+
+
+# ----------------------------------------
+# Notes & Explanation:
+
+# Regex & grep Usage:
+# grep -oE "from ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"
+#   - -o : Print only the matched part (not the full line)
+#   - -E : Use Extended regex
+#   - from (...) : Matches IP address following "from"
+#   ➤ Output: "from 192.168.1.10"
+
+# awk '{print $2}':
+#   - Extracts IP from "from xxx.xxx.xxx.xxx"
+
+# Full log example from /var/log/secure:
+#   Jul  2 10:22:11 vm1 sshd[12345]: Failed password for invalid user shady from 192.168.1.50 port 54321 ssh2
+#   Jul  2 10:25:08 vm1 sshd[67890]: Failed password for root from 10.0.0.5 port 53212 ssh2
+
+# awk '{print $1, $2, $3}':
+#   - Extracts date → e.g., "Jul 2 10:22:11"
+
+# grep -oP "for (invalid user )?\K\S+":
+#   - -P : Perl regex (needed for \K)
+#   - \K : Keep only what's after it
+#   - \S+ : Match one word (username)
+#   ➤ Output: shady OR root
+
+# Summary of Key Terms:
+#   - \S+ → non-space characters
+#   - \K  → reset match point
+#   - awk → column-based text extraction
+
+# ----------------------------------------
+
