@@ -2,7 +2,7 @@
 
 # SSH Failed Login Detector
 # Author: Shady Emad
-# Date: 2/7/2024
+
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
