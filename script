@@ -2,31 +2,47 @@
 
 # SSH Failed Login Detector
 # Author: Shady Emad
+# Date: 2/7/2025
 
 
-# Check if running as root
+############### Check if running as root ##############
 if [ "$EUID" -ne 0 ]; then
    echo "Please run this script as root (using sudo)"
    exit 1
 fi   
 
-log_file="/var/log/secure"
-today=$(date +%F)
-output_file="failed_ssh_report_${today}.txt"
-
-# Check if log file exists
-if [ ! -f "$log_file" ]; then
-    echo "Log file not found: $log_file"
+############### Check log file #########################
+if [[ -f /var/log/secure ]]; then
+    log_file="/var/log/secure"
+elif [[ -f /var/log/auth.log ]]; then
+    log_file="/var/log/auth.log"
+else
+    echo "Neither /var/log/secure nor /var/log/auth.log exist"
     exit 1
 fi
 
-# Write report header
+############### Check for failed attempts ##############
+failed_lines=$(grep "Failed password" "$log_file")
+if [[ -z "$failed_lines" ]]; then
+    echo "No failed SSH login attempts found."
+    exit 0
+fi
+
+############### Create reports directory ################
+report_dir="./reports"
+mkdir -p "$report_dir"
+
+############### Output report file ######################
+today=$(date +%F)
+output_file="$report_dir/failed_ssh_report_${today}.txt"
+
+############### Write report header #####################
 echo "SSH Failed Login Attempts" > "$output_file"
 echo "Generated on: $(date)" >> "$output_file"
 echo "----------------------------------------" >> "$output_file"
 
-# Extract failed login attempts from the log
-grep "Failed password" "$log_file" | while read -r line; do
+###### Extract failed login attempts from the log #########
+echo "$failed_lines" | while read -r line; do
     date_part=$(echo "$line" | awk '{print $1, $2, $3}')
     user=$(echo "$line" | grep -oP "for (invalid user )?\K\S+" | head -n1)
     ip=$(echo "$line" | grep -oE "from ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)" | awk '{print $2}')
@@ -40,21 +56,21 @@ echo -e "\nTop IPs by number of failed attempts:" >> "$output_file"
 echo "----------------------------------------" >> "$output_file"
 
 # Calculate and append Top IPs by failed attempts
-grep "Failed password" "$log_file" | \
+echo "$failed_lines" | \
   grep -oE "from ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)" | \
   awk '{print $2}' | \
   sort | uniq -c | sort -nr >> "$output_file"
 
-echo "Report saved to $output_file"
+echo "✅ Report saved to $output_file"
 
-# Function to clean up old reports
+########## Function to clean up old reports #########
 cleanup_old_reports() {
-    echo "Cleaning up reports older than $retention_days days..."
-    find . -name "failed_ssh_report_*.txt" -type f -mtime +$retention_days -exec rm -v {} \;
+    echo "Cleaning up reports older than $retention_days days in $report_dir..."
+    find "$report_dir" -name "failed_ssh_report_*.txt" -type f -mtime +$retention_days -exec rm -v {} \;
 }
 
 # Ask user if they want to delete old reports
-read -p "Do you want to delete reports older than a certain number of days? (y/n): " cleanup_choice
+read -p " Do you want to delete reports older than a certain number of days? (y/n): " cleanup_choice
 
 if [[ "$cleanup_choice" == [Yy] ]]; then
     read -p "Enter retention days for old reports (e.g., 7): " retention_days
@@ -62,10 +78,6 @@ if [[ "$cleanup_choice" == [Yy] ]]; then
 else
     echo "Skipped deleting old reports."
 fi
-
-
-
-
 
 
 
